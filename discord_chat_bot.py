@@ -32,6 +32,7 @@ reset_markers = {}     # チャンネルごとのリセット位置（履歴の�
 channel_settings = {}  # チャンネルごとのテーマ設定 {channel_id: {"theme": テーマ, "expire": 終了時刻}}
 channel_modes = {}     # チャンネルごとの継続モード {"mode": "short" / "long" / "chaos", "expire": 終了時刻}
 channel_log_limits = {}# チャンネルごとの履歴読み込み件数 {channel_id: 件数}
+silent_modes = {}      # チャンネルごとのサイレントモード {channel_id: True/False}
 channel_locks = {}     # チャンネルごとの同時実行を防ぐためのロック
 last_reply_times = {}  # チャンネルごとのクールダウン用最終返信時刻
 
@@ -74,7 +75,7 @@ async def generate_ai_reply_async(system_instruction: str, user_prompt: str, mod
 
     return await asyncio.to_thread(_call_ai)
 
-# 💡 分割送信＆リプライ対応関数
+# 💡 分割送信＆リプライ対応関数（連投防止のため間隔を約15秒に変更）
 async def send_split_message(channel, text, chunk_size=45, reply_to=None):
     if not text:
         return
@@ -91,7 +92,12 @@ async def send_split_message(channel, text, chunk_size=45, reply_to=None):
     chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
     for i, chunk in enumerate(chunks):
         async with channel.typing():
-            await asyncio.sleep(1.0)
+            # 2通目以降は15秒間隔を空けて連投を防ぐ
+            if i > 0:
+                await asyncio.sleep(15.0)
+            else:
+                await asyncio.sleep(0.6)
+
             if i == 0 and reply_to:
                 await reply_to.reply(chunk, mention_author=False)
             else:
@@ -134,6 +140,10 @@ async def kaso_boushi_loop():
         if TARGET_CHANNEL_ID:
             channel = bot.get_channel(TARGET_CHANNEL_ID)
             if channel:
+                # サイレントモード判定（サイレント中は自発つぶやきを行わない）
+                if silent_modes.get(channel.id, False):
+                    continue
+
                 if channel.id not in channel_locks:
                     channel_locks[channel.id] = asyncio.Lock()
 
@@ -175,10 +185,22 @@ async def on_message(message):
             del channel_modes[message.channel.id]
         if message.channel.id in channel_log_limits:
             del channel_log_limits[message.channel.id]
-        await message.reply("脳みそ・テーマ・モード・履歴件数設定をすべて綺麗にリセットしたよ！🧠✨", mention_author=False)
+        if message.channel.id in silent_modes:
+            del silent_modes[message.channel.id]
+        await message.reply("脳みそ・テーマ・モード・履歴件数・サイレント設定をすべて綺麗にリセットしたよ！🧠✨", mention_author=False)
         return
 
-    # 2. !log_XX コマンド（会話履歴の読み込み件数変更）
+    # 2. !silent_on / !silent_off コマンド（サイレントモード設定）
+    if content == '!silent_on':
+        silent_modes[message.channel.id] = True
+        await message.reply("【サイレントモード：ON】これからは話題に参加せず静かに見守るね！🤫", mention_author=False)
+        return
+    if content == '!silent_off':
+        silent_modes[message.channel.id] = False
+        await message.reply("【サイレントモード：OFF】通常通り会話に参加するよ！おしゃべり再開！🗣️✨", mention_author=False)
+        return
+
+    # 3. !log_XX コマンド（会話履歴の読み込み件数変更）
     if content.startswith('!log_'):
         try:
             limit_str = content[5:].strip()
@@ -192,7 +214,7 @@ async def on_message(message):
             await message.reply("数字で指定してね！例: `!log_10`", mention_author=False)
         return
 
-    # 3. 各種モードの ON / OFF コマンド
+    # 4. 各種モードの ON / OFF コマンド
     if content == '!short_on':
         channel_modes[message.channel.id] = {"mode": "short", "expire": now + timedelta(hours=12)}
         await message.reply("【ショートモード：ON】これからの発言は極めて短くするね！", mention_author=False)
@@ -223,7 +245,7 @@ async def on_message(message):
         await message.reply("【カオスモード：OFF】正気を取り戻しました。お騒がせしました！😌", mention_author=False)
         return
 
-    # 4. !cancel コマンド（テーマ設定のみ解除）
+    # 5. !cancel コマンド（テーマ設定のみ解除）
     if content == '!cancel':
         if message.channel.id in channel_settings:
             del channel_settings[message.channel.id]
@@ -232,7 +254,7 @@ async def on_message(message):
             await message.reply("現在有効なテーマ縛りはないよ！", mention_author=False)
         return
 
-    # 5. !setting_XX コマンド（24時間テーマ固定）
+    # 6. !setting_XX コマンド（24時間テーマ固定）
     if content.startswith('!setting_'):
         theme = content[9:].strip()
         if theme:
@@ -243,7 +265,7 @@ async def on_message(message):
             await message.reply("テーマが指定されてないよ！例: `!setting_ラーメン`", mention_author=False)
         return
 
-    # 6. !new コマンド（新たな話題）
+    # 7. !new コマンド（新たな話題）
     if content == '!new':
         if message.channel.id not in channel_locks:
             channel_locks[message.channel.id] = asyncio.Lock()
@@ -259,6 +281,11 @@ async def on_message(message):
                     await send_split_message(message.channel, reply_text, reply_to=message)
                 except Exception as e:
                     await message.reply(f"エラー: {e}", mention_author=False)
+        return
+
+    # --- サイレントモード時の自動判定スキップ ---
+    # ONの場合は、ユーザーからの自発的な呼び出し（通常メッセージ、メンション、リプライ、確率的自動返信）に反応しない
+    if silent_modes.get(message.channel.id, False):
         return
 
     # --- 返信判定ロジック ---
@@ -282,13 +309,12 @@ async def on_message(message):
     settings = get_time_settings(now.hour)
 
     # 確率的自動返信の判定
-    # 条件: 時間帯が有効かつ、クールダウン（20秒）が明けており、かつ確率にヒットする場合のみ
     should_auto_reply = False
     if settings["active"] and not is_cooldown_active:
         if random.random() < settings["reply_rate"]:
             should_auto_reply = True
 
-    # 最終的に返信すべきかどうか（メンションやコマンド等は無条件、自動返信は上記フラグに依存）
+    # 最終的に返信すべきかどうか
     should_reply = is_command or is_mentioned or is_reply_to_bot or should_auto_reply
 
     if not should_reply:
@@ -298,15 +324,12 @@ async def on_message(message):
     if message.channel.id not in channel_locks:
         channel_locks[message.channel.id] = asyncio.Lock()
 
-    # ロックを取得して処理を実行（すでに別の返信処理が走っている場合はスキップ・待機して最新メッセージに絞る）
+    # ロックを取得して処理を実行
     async with channel_locks[message.channel.id]:
-        # 【追加対策】ロック取得時点において、直前のメッセージがこのメッセージより新しいものであれば
-        # 多重処理や古いメッセージへの過剰返信を防ぐため、自動返信の場合はここでスキップする
         if should_auto_reply and not (is_command or is_mentioned or is_reply_to_bot):
             try:
                 async for latest_msg in message.channel.history(limit=1):
                     if latest_msg.id != message.id:
-                        # 自分以外のより新しいメッセージが既に存在している場合は重複を防ぐため中止
                         return
             except Exception:
                 pass
@@ -329,7 +352,7 @@ async def on_message(message):
             if message.channel.id in channel_modes:
                 del channel_modes[message.channel.id]
 
-        # 直近の会話履歴を取得（チャンネルごとの設定値を適用。デフォルトは10件）
+        # 直近の会話履歴を取得
         log_limit = channel_log_limits.get(message.channel.id, 10)
         history_logs = []
         reset_time = reset_markers.get(message.channel.id)
