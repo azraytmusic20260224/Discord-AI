@@ -33,4 +33,4 @@ jobs:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         TARGET_CHANNEL_ID: ${{ secrets.TARGET_CHANNEL_ID }}
       run: |
-        python discord_bot_chat.py
+        python discord_chat_bot.py
