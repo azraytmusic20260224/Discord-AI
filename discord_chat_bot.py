@@ -112,15 +112,15 @@ def get_time_settings(hour):
     if 23 <= hour or hour < 6:
         return {"active": False, "min_wait": 0, "max_wait": 0, "reply_rate": 0}
     elif 6 <= hour < 8:
-        return {"active": True, "min_wait": 15, "max_wait": 30, "reply_rate": 0.3}
+        return {"active": True, "min_wait": 5, "max_wait": 45, "reply_rate": 0.7}
     elif 8 <= hour < 12:
-        return {"active": True, "min_wait": 30, "max_wait": 90, "reply_rate": 0.5}
+        return {"active": True, "min_wait": 20, "max_wait": 120, "reply_rate": 0.4}
     elif 12 <= hour < 13:
-        return {"active": True, "min_wait": 20, "max_wait": 40, "reply_rate": 0.4}
+        return {"active": True, "min_wait": 10, "max_wait": 40, "reply_rate": 0.7}
     elif 13 <= hour < 16:
-        return {"active": True, "min_wait": 30, "max_wait": 80, "reply_rate": 0.5}
+        return {"active": True, "min_wait": 15, "max_wait": 80, "reply_rate": 0.2}
     elif 16 <= hour < 23:
-        return {"active": True, "min_wait": 15, "max_wait": 40, "reply_rate": 0.2}
+        return {"active": True, "min_wait": 5, "max_wait": 15, "reply_rate": 0.1}
     return {"active": False, "min_wait": 30, "max_wait": 60, "reply_rate": 0.3}
 
 # 💡 自動つぶやきループ
